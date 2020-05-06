@@ -1,17 +1,8 @@
 from __future__ import print_function, division
 import os
-# from tensorflow import keras
-# ### hack tf-keras to appear as top level keras
-# import sys
-# sys.modules['keras'] = keras
-### end of hack
-
-# os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 import tensorflow as tf
 from tensorflow.keras.layers import Input, Dense, Reshape, Flatten, Dropout, multiply, Conv2DTranspose, LeakyReLU, UpSampling2D, Conv2D, Concatenate
 from tensorflow.keras.layers import BatchNormalization, Activation, Embedding, ZeroPadding2D
-# from tensorflow. keras.layers.advanced_activations import LeakyReLU
-# from tensorflow.keras.layers.convolutional import UpSampling2D, Conv2D
 from tensorflow.keras.models import Sequential, Model
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.losses import BinaryCrossentropy
@@ -21,7 +12,6 @@ import os
 from PIL import Image
 import numpy as np
 import sys
-from keras.utils import to_categorical, plot_model
 import math
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
 from keras.initializers import RandomNormal
@@ -171,7 +161,7 @@ class CGAN():
         for subdir, dirs, files in os.walk(rootdir):
             for filename in files:
                 image = Image.open(subdir + '/' + filename)#.convert('L')
-                newsize = (self.img_cols, self.img_rows) 
+                newsize = (self.img_cols, self.img_rows)
                 im1 = image.resize(newsize)
                 pixels = img_to_array(im1)
 
@@ -191,8 +181,6 @@ class CGAN():
 
         elif type_of_noise == "uniform_noise":
             return np.random.uniform(-1.0, 1.0, size=[self.batch_size, self.latent_dim])
-
-
 
     def decode_labels(self, encoded_labels):
         decoded_labels = []
@@ -235,8 +223,7 @@ class CGAN():
                 try:
                     gen_imgs = self.generator.predict([noise, labels])
                 except ValueError:
-                    # print('uhm')
-                    continue    
+                    continue
 
                 # --------------------- Train the Discriminator ---------------------
                 d_loss_real = self.discriminator.train_on_batch([imgs, labels], real)
@@ -246,7 +233,7 @@ class CGAN():
                 #  --------------------- Train the Generator ---------------------
                 # Condition on labels (random one-hot labels)
                 # fake_labels = np.eye(self.num_classes)[np.random.choice(self.num_classes, self.batch_size)]
-                fake_labels = randint(0, self.num_classes, self.batch_size)        
+                fake_labels = randint(0, self.num_classes, self.batch_size)
                 cgan_loss, acc = self.cgan_model.train_on_batch([noise, fake_labels], real)
 
                 # Plot the progress
