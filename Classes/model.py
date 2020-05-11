@@ -20,14 +20,14 @@ from PIL import Image
 from sklearn import preprocessing
 from tensorflow.keras import optimizers
 from tensorflow.keras.models import Model
-from tensorflow.keras.applications.densenet import DenseNet121
+from tensorflow.keras.applications.densenet import DenseNet121, preprocess_input
 from tensorflow.keras.callbacks import (EarlyStopping, ModelCheckpoint,
                                         ReduceLROnPlateau)
 from tensorflow.keras.layers import (Conv2D, Dense, Dropout, Flatten,
                                      MaxPooling2D)
 from tensorflow.keras.models import Model, Sequential
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
-
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 
 
 config = tf.compat.v1.ConfigProto(gpu_options =
@@ -45,6 +45,7 @@ class DL():
     def __init__(self, config):
         self.data_dir = config['data_dir']
         self.results_dir = config['results_dir']
+        self.model_dir = config['model_dir']
         self.epochs = config['epochs']
         self.batch_size = config['batch_size']
         self.learning_rate = config['learning_rate']
@@ -56,9 +57,13 @@ class DL():
         self.val_set_size = .15
         self.test_set_size = .15
         self.weights_filename = "final_model" + "_weights.h5"
-        self.data_generator = ImageDataGenerator(
-                rescale=1./255,
+        self.train_data_generator = ImageDataGenerator(
+                preprocessing_function=preprocess_input
                )
+        self.test_data_generator = ImageDataGenerator(
+            preprocessing_function=preprocess_input
+            )
+
 
         # compute some properties of the data
         self.compute_n_samples()
@@ -156,12 +161,12 @@ class DL():
     def compute_n_training_samples(self):
         """Computes the amount of training samples
         """
-        self.n_training_samples = self.train_set_size * self.n_samples
+        self.n_training_samples = int(self.train_set_size * self.n_samples)
 
     def compute_n_validation_samples(self):
         """Computes the amount of validation samples
         """
-        self.n_validation_samples = self.val_set_size * self.n_samples
+        self.n_validation_samples = int(self.val_set_size * self.n_samples)
 
     def set_data_generator(self, generator):
         """Change the data generator
@@ -178,28 +183,35 @@ class DL():
     def set_training_data_generator(self):
         """Create the generator for the training data
         """
-        self.train_gen = self.data_generator.flow_from_directory(
+        self.train_gen = self.train_data_generator.flow_from_directory(
             self.data_dir + '/train',
             target_size=self.target_size,
-            batch_size=self.batch_size
+            batch_size=self.batch_size,
+            class_mode='categorical'
         )
 
     def set_validation_data_generator(self):
         """Create the generator for the validation data
         """
-        self.val_gen = self.data_generator.flow_from_directory(
+        self.val_gen = self.test_data_generator.flow_from_directory(
             self.data_dir + '/val',
             target_size=self.target_size,
-            batch_size=self.batch_size
+            batch_size=self.batch_size,
+            class_mode='categorical',
+            shuffle=False
+
         )
 
     def set_test_data_generator(self):
         """Create the generator for the training data
         """
-        self.test_gen = self.data_generator.flow_from_directory(
+        self.test_gen = self.test_data_generator.flow_from_directory(
             self.data_dir + '/test',
             target_size=self.target_size,
-            batch_size=self.batch_size
+            batch_size=self.batch_size,
+            class_mode='categorical',
+            shuffle=False
+
         )
 
     def set_model(self, model):
@@ -220,14 +232,6 @@ class DL():
             ratios {tuple of floats that sum to 1} -- in the form (train_size, val_size, test_size)
         """
         split_folders.ratio(indir, output=outdir, seed=1337, ratio=ratios) 
-
-    @staticmethod
-    def get_callbacks(name_weights, patience_lr):
-        mcp_save = ModelCheckpoint(name_weights, save_best_only=True, monitor='val_loss', mode='min')
-        # reduce_lr_loss = ReduceLROnPlateau(monitor='loss', factor=0.1, patience=patience_lr, verbose=1, min_delta=1e-4, mode='min')
-        log_dir = "logs/fit/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-        tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir=log_dir, histogram_freq=1)
-        return [mcp_save]
 
     def wrap_generator(self, batches):
         """Take as input a Keras ImageGen (Iterator) and generate more augmentations
@@ -256,43 +260,51 @@ class DL():
     def train_model(self):
         """Train the model
         """
-        callbacks = self.get_callbacks(name_weights = self.weights_filename, patience_lr=10)
+        # callbacks = self.get_callbacks(patience_lr=10)
 
         train_generator = self.wrap_generator(self.train_gen)
         val_generator = self.wrap_generator(self.val_gen)
 
         self.model.fit_generator(
                         train_generator,
-                        steps_per_epoch = int(self.n_training_samples // self.batch_size),
+                        steps_per_epoch = int(math.ceil(self.n_training_samples // self.batch_size)),
                         epochs=self.epochs,
                         shuffle=True,
                         verbose=1,
                         validation_data = val_generator,
-                        validation_steps = int(self.n_validation_samples // self.batch_size),
-                        callbacks = callbacks)
+                        validation_steps = int(math.ceil(self.n_validation_samples // self.batch_size)),
+                        )
 
     def evaluate_model(self):
-        filenames = self.test_gen.filenames
-        nb_samples = len(filenames)
+        """Evaluate the model
+        """
+        Y_pred = self.model.predict(self.test_gen)
+        y_pred = np.argmax(Y_pred, axis=1)
 
-        predictions = self.model.predict(self.test_gen, steps = nb_samples)
-        true_labels = self.test_gen.classes
+        accuracy = accuracy_score(self.test_gen.classes, y_pred)
+        precision = precision_score(self.test_gen.classes, y_pred, average='weighted')
+        recall = recall_score(self.test_gen.classes, y_pred, average='weighted')
+        f1 = f1_score(self.test_gen.classes, y_pred, average='weighted')
 
-        y_true = true_labels
-        y_pred = np.array([np.argmax(x) for x in predictions])
+        print("Accuracy in test set: %0.1f%% " % (accuracy * 100))
+        print("Precision in test set: %0.1f%% " % (precision * 100))
+        print("Recall in test set: %0.1f%% " % (recall * 100))
+        print("F1 score in test set: %0.1f%% " % (f1 * 100))
 
-        test_acc = sum(y_true == y_pred) / len(y_true)
-        print('Accuracy: {}'.format(test_acc))
-        self.test_acc = test_acc
+        results = pd.DataFrame(columns=['Accuracy', 'Precision', 'Recall', 'F1'])
+        results['Accuracy'] = [accuracy]
+        results['Precision'] = [precision]
+        results['Recall'] = [recall]
+        results['F1'] = [f1]
 
+        results.to_latex(self.results_dir + '/scores.tex')
+        results.to_excel(self.results_dir + '/scores.xlsx')
 
     def save_results(self):
         # save the model
-        # self.model.save(self.results_dir + '/model')
+        self.model.save(self.model_dir)
         # Get the dictionary containing each metric and the loss for each epoch
         history_dict = self.model.history.history
-        # Save it under the form of a json file
-        # json.dump(history_dict, open(self.results_dir + '/history.json', 'w'))
 
         # list of epoch ints
         n_epochs = [i + 1 for i in range(self.epochs)]
